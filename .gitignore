@@ -1,0 +1,22 @@
+# Ambiente virtual
+.venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Arquivos do VS Code
+.vscode/
+
+# Arquivos temporários
+*.tmp
+*.log
+
+# Arquivos Excel gerados
+relatorio_interjornada.xlsx
+
+# Dados reais ou arquivos locais
+dados/
+*.csv
+*.xlsx
