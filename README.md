@@ -6,8 +6,13 @@ O projeto foi criado com foco em rotinas de Recursos Humanos e Departamento Pess
 
 ## Demonstração
 
-![Dashboard do RH Jornada Analyzer](assets/dashboard.png)
+### Visão geral e indicadores
 
+![Dashboard - Resumo da análise](assets/dashboard-1.png)
+
+### Ocorrências e exportação
+
+![Dashboard - Ocorrências identificadas](assets/dashboard-2.png)
 ## Funcionalidades
 
 * Importação de arquivos Excel e CSV
