@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
+from openpyxl.styles import Font, Alignment
+from openpyxl.utils import get_column_letter
+
+
 # =========================================================
 # CONFIGURAÇÃO DA PÁGINA
 # =========================================================
@@ -25,7 +29,121 @@ st.divider()
 
 
 # =========================================================
-# IMPORTAÇÃO DO ARQUIVO
+# FUNÇÕES AUXILIARES
+# =========================================================
+
+def decimal_para_hhmm(horas):
+    """
+    Converte horas decimais para o formato HH:MM.
+
+    Exemplo:
+    10.5 -> 10:30
+    0.5  -> 00:30
+    """
+
+    if pd.isna(horas):
+        return "-"
+
+    minutos_totais = round(float(horas) * 60)
+
+    horas_inteiras = minutos_totais // 60
+    minutos = minutos_totais % 60
+
+    return f"{horas_inteiras:02d}:{minutos:02d}"
+
+
+def gerar_excel(resultado_completo, ocorrencias, resumo_colaborador):
+    """
+    Gera um relatório Excel em memória.
+
+    O arquivo possui três abas:
+    - Resultado Completo
+    - Ocorrências
+    - Resumo por Colaborador
+    """
+
+    buffer = BytesIO()
+
+    with pd.ExcelWriter(
+        buffer,
+        engine="openpyxl"
+    ) as writer:
+
+        resultado_completo.to_excel(
+            writer,
+            sheet_name="Resultado Completo",
+            index=False
+        )
+
+        ocorrencias.to_excel(
+            writer,
+            sheet_name="Ocorrências",
+            index=False
+        )
+
+        resumo_colaborador.to_excel(
+            writer,
+            sheet_name="Resumo Colaborador",
+            index=False
+        )
+
+        # -------------------------------------------------
+        # FORMATAÇÃO DAS ABAS
+        # -------------------------------------------------
+
+        for nome_aba in writer.book.sheetnames:
+
+            planilha = writer.book[nome_aba]
+
+            planilha.freeze_panes = "A2"
+            planilha.auto_filter.ref = planilha.dimensions
+
+            # Cabeçalho
+            for celula in planilha[1]:
+
+                celula.font = Font(
+                    bold=True
+                )
+
+                celula.alignment = Alignment(
+                    horizontal="center",
+                    vertical="center"
+                )
+
+            # Ajuste automático da largura das colunas
+            for coluna in planilha.columns:
+
+                maior_tamanho = 0
+
+                letra_coluna = get_column_letter(
+                    coluna[0].column
+                )
+
+                for celula in coluna:
+
+                    if celula.value is not None:
+
+                        tamanho = len(
+                            str(celula.value)
+                        )
+
+                        if tamanho > maior_tamanho:
+                            maior_tamanho = tamanho
+
+                planilha.column_dimensions[
+                    letra_coluna
+                ].width = min(
+                    maior_tamanho + 2,
+                    45
+                )
+
+    buffer.seek(0)
+
+    return buffer
+
+
+# =========================================================
+# IMPORTAÇÃO
 # =========================================================
 
 st.subheader("1. Importar arquivo de ponto")
@@ -36,28 +154,34 @@ arquivo = st.file_uploader(
 )
 
 
-# Todo o processamento abaixo só acontece
-# quando o usuário carregar um arquivo.
 if arquivo is not None:
 
     # =====================================================
-    # LEITURA DO ARQUIVO
+    # LEITURA
     # =====================================================
 
     try:
 
         if arquivo.name.lower().endswith(".xlsx"):
-            dados = pd.read_excel(arquivo)
 
-        elif arquivo.name.lower().endswith(".csv"):
-            dados = pd.read_csv(arquivo)
+            dados = pd.read_excel(
+                arquivo
+            )
 
-        st.success("Arquivo carregado com sucesso!")
+        else:
+
+            dados = pd.read_csv(
+                arquivo
+            )
+
+        st.success(
+            "Arquivo carregado com sucesso!"
+        )
 
     except Exception as erro:
 
         st.error(
-            f"Não foi possível ler o arquivo. Erro: {erro}"
+            f"Erro ao ler o arquivo: {erro}"
         )
 
         st.stop()
@@ -84,20 +208,20 @@ if arquivo is not None:
     if colunas_faltantes:
 
         st.error(
-            "A planilha não possui todas as colunas obrigatórias."
+            "A planilha não possui todas "
+            "as colunas obrigatórias."
         )
 
         st.write(
-            "Colunas que estão faltando:"
+            "Colunas ausentes:",
+            colunas_faltantes
         )
-
-        st.write(colunas_faltantes)
 
         st.stop()
 
 
     # =====================================================
-    # CONVERSÃO DE DATA E HORÁRIO
+    # TRATAMENTO DOS DADOS
     # =====================================================
 
     dados["Data"] = pd.to_datetime(
@@ -121,13 +245,14 @@ if arquivo is not None:
 
 
     # =====================================================
-    # JORNADAS QUE TERMINAM APÓS A MEIA-NOITE
+    # JORNADA APÓS A MEIA-NOITE
     # =====================================================
 
-    # Exemplo de jornada que ultrapassa a meia-noite:
-    # Entrada: 22:00
-    # Saída:   06:00
-    # Nesse caso, a saída pertence ao dia seguinte.
+    # Exemplo:
+    # Entrada 22:00
+    # Saída   06:00
+    #
+    # A saída pertence ao dia seguinte.
 
     jornada_noturna = (
         dados["DataHoraSaida"]
@@ -147,32 +272,26 @@ if arquivo is not None:
 
 
     # =====================================================
-    # ORGANIZAÇÃO DOS REGISTROS
+    # ORDENAÇÃO
     # =====================================================
 
-    # Para calcular corretamente a interjornada,
-    # precisamos organizar cada colaborador
-    # cronologicamente.
-
     dados = dados.sort_values(
-        by=[
+        [
             "Matrícula",
             "DataHoraEntrada"
         ]
-    )
+    ).reset_index(drop=True)
 
 
     # =====================================================
-    # IDENTIFICAÇÃO DA SAÍDA ANTERIOR
+    # SAÍDA ANTERIOR
     # =====================================================
 
-    # Para cada colaborador, buscamos a saída da jornada
-    # imediatamente anterior.
-    # shift(1) traz o valor da linha anterior.
-    
     dados["SaidaAnterior"] = (
         dados
-        .groupby("Matrícula")["DataHoraSaida"]
+        .groupby("Matrícula")[
+            "DataHoraSaida"
+        ]
         .shift(1)
     )
 
@@ -192,45 +311,47 @@ if arquivo is not None:
 
 
     # =====================================================
-    # REGRA DE INTERJORNADA
+    # CONFIGURAÇÕES DA ANÁLISE
     # =====================================================
 
-    LIMITE_INTERJORNADA = 11
+    st.sidebar.header(
+        "⚙️ Configurações"
+    )
+
+    limite_interjornada = (
+        st.sidebar.number_input(
+            "Limite mínimo entre jornadas (horas)",
+            min_value=1.0,
+            max_value=24.0,
+            value=11.0,
+            step=0.5
+        )
+    )
 
 
-    # -----------------------------------------------------
-    # CÁLCULO DO DÉFICIT
-    # -----------------------------------------------------
+    # =====================================================
+    # DÉFICIT
+    # =====================================================
 
     dados["DeficitHoras"] = (
-        LIMITE_INTERJORNADA
+        limite_interjornada
         - dados["InterjornadaHoras"]
     ).clip(lower=0)
 
 
-    # -----------------------------------------------------
-    # CLASSIFICAÇÃO DA INTERJORNADA
-    # -----------------------------------------------------
+    # =====================================================
+    # STATUS
+    # =====================================================
 
     def classificar_interjornada(horas):
-        """
-        Classifica o descanso entre duas jornadas.
-
-        Primeira jornada:
-        não existe jornada anterior para comparação.
-
-        Regular:
-        descanso igual ou superior ao limite definido.
-
-        Ocorrência:
-        descanso inferior ao limite.
-        """
 
         if pd.isna(horas):
+
             return "Primeira jornada"
 
-        if horas < LIMITE_INTERJORNADA:
-            return "⚠️ Interjornada inferior a 11h"
+        if horas < limite_interjornada:
+
+            return "⚠️ Interjornada inferior ao limite"
 
         return "✅ Regular"
 
@@ -242,23 +363,160 @@ if arquivo is not None:
 
 
     # =====================================================
-    # INDICADORES GERAIS
+    # FILTROS
+    # =====================================================
+
+    st.sidebar.header(
+        "🔎 Filtros"
+    )
+
+    nomes = sorted(
+        dados["Nome"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    colaborador = (
+        st.sidebar.selectbox(
+            "Colaborador",
+            ["Todos"] + nomes
+        )
+    )
+
+
+    data_minima = (
+        dados["DataHoraEntrada"]
+        .min()
+        .date()
+    )
+
+    data_maxima = (
+        dados["DataHoraEntrada"]
+        .max()
+        .date()
+    )
+
+
+    periodo = (
+        st.sidebar.date_input(
+            "Período",
+            value=(
+                data_minima,
+                data_maxima
+            ),
+            min_value=data_minima,
+            max_value=data_maxima
+        )
+    )
+
+
+    # =====================================================
+    # APLICAÇÃO DOS FILTROS
+    # =====================================================
+
+    dados_filtrados = dados.copy()
+
+
+    if colaborador != "Todos":
+
+        dados_filtrados = (
+            dados_filtrados[
+                dados_filtrados["Nome"]
+                == colaborador
+            ]
+        )
+
+
+    if isinstance(
+        periodo,
+        (tuple, list)
+    ) and len(periodo) == 2:
+
+        inicio = pd.Timestamp(
+            periodo[0]
+        )
+
+        fim = (
+            pd.Timestamp(
+                periodo[1]
+            )
+            + pd.Timedelta(days=1)
+            - pd.Timedelta(seconds=1)
+        )
+
+        dados_filtrados = (
+            dados_filtrados[
+                (
+                    dados_filtrados[
+                        "DataHoraEntrada"
+                    ] >= inicio
+                )
+                &
+                (
+                    dados_filtrados[
+                        "DataHoraEntrada"
+                    ] <= fim
+                )
+            ]
+        )
+
+
+    # =====================================================
+    # FORMATAÇÃO HH:MM
+    # =====================================================
+
+    dados_filtrados[
+        "Interjornada"
+    ] = (
+        dados_filtrados[
+            "InterjornadaHoras"
+        ]
+        .apply(decimal_para_hhmm)
+    )
+
+
+    dados_filtrados[
+        "Déficit"
+    ] = (
+        dados_filtrados[
+            "DeficitHoras"
+        ]
+        .apply(decimal_para_hhmm)
+    )
+
+
+    # =====================================================
+    # INDICADORES
     # =====================================================
 
     total_colaboradores = (
-        dados["Matrícula"]
+        dados_filtrados[
+            "Matrícula"
+        ]
         .nunique()
     )
 
-    total_registros = len(dados)
+    total_registros = (
+        len(
+            dados_filtrados
+        )
+    )
 
     total_ocorrencias = (
-        dados["Status"]
-        == "⚠️ Interjornada inferior a 11h"
-    ).sum()
+        dados_filtrados[
+            "Status"
+        ]
+        .eq(
+            "⚠️ Interjornada inferior ao limite"
+        )
+        .sum()
+    )
 
     total_deficit = (
-        dados["DeficitHoras"]
+        dados_filtrados[
+            "DeficitHoras"
+        ]
         .sum()
     )
 
@@ -267,37 +525,42 @@ if arquivo is not None:
     # DASHBOARD
     # =====================================================
 
-    st.subheader("📊 Resumo da análise")
+    st.subheader(
+        "📊 Resumo da análise"
+    )
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = (
+        st.columns(4)
+    )
 
-    with col1:
 
-        st.metric(
-            label="Colaboradores",
-            value=total_colaboradores
+    col1.metric(
+        "Colaboradores",
+        total_colaboradores
+    )
+
+    col2.metric(
+        "Registros analisados",
+        total_registros
+    )
+
+    col3.metric(
+        "Ocorrências",
+        int(total_ocorrencias)
+    )
+
+    col4.metric(
+        "Déficit total",
+        decimal_para_hhmm(
+            total_deficit
         )
+    )
 
-    with col2:
 
-        st.metric(
-            label="Registros analisados",
-            value=total_registros
-        )
-
-    with col3:
-
-        st.metric(
-            label="Ocorrências",
-            value=total_ocorrencias
-        )
-
-    with col4:
-
-        st.metric(
-            label="Déficit total",
-            value=f"{total_deficit:.2f} h"
-        )
+    st.caption(
+        f"Parâmetro atual de interjornada: "
+        f"{limite_interjornada:g} horas."
+    )
 
     st.divider()
 
@@ -306,33 +569,38 @@ if arquivo is not None:
     # RESULTADO COMPLETO
     # =====================================================
 
-    st.subheader("2. Resultado da análise")
+    st.subheader(
+        "2. Resultado da análise"
+    )
 
-    resultado = dados[
-        [
-            "Matrícula",
-            "Nome",
-            "DataHoraEntrada",
-            "DataHoraSaida",
-            "SaidaAnterior",
-            "InterjornadaHoras",
-            "DeficitHoras",
-            "Status"
+
+    resultado = (
+        dados_filtrados[
+            [
+                "Matrícula",
+                "Nome",
+                "DataHoraEntrada",
+                "DataHoraSaida",
+                "SaidaAnterior",
+                "Interjornada",
+                "Déficit",
+                "Status"
+            ]
         ]
-    ].copy()
-
-
-    # Arredondamos para duas casas decimais.
-
-    resultado["InterjornadaHoras"] = (
-        resultado["InterjornadaHoras"]
-        .round(2)
+        .copy()
     )
 
-    resultado["DeficitHoras"] = (
-        resultado["DeficitHoras"]
-        .round(2)
-    )
+
+    resultado.columns = [
+        "Matrícula",
+        "Nome",
+        "Entrada",
+        "Saída",
+        "Saída Anterior",
+        "Interjornada",
+        "Déficit",
+        "Status"
+    ]
 
 
     st.dataframe(
@@ -343,23 +611,31 @@ if arquivo is not None:
 
 
     # =====================================================
-    # OCORRÊNCIAS IDENTIFICADAS
+    # OCORRÊNCIAS
     # =====================================================
 
-    ocorrencias = resultado[
-        resultado["Status"]
-        == "⚠️ Interjornada inferior a 11h"
-    ].copy()
+    ocorrencias = (
+        resultado[
+            resultado["Status"]
+            == (
+                "⚠️ Interjornada "
+                "inferior ao limite"
+            )
+        ]
+        .copy()
+    )
 
 
-    st.subheader("3. Ocorrências identificadas")
+    st.subheader(
+        "3. Ocorrências identificadas"
+    )
 
 
     if ocorrencias.empty:
 
         st.success(
-            "Nenhuma ocorrência de interjornada "
-            "inferior a 11 horas foi encontrada."
+            "Nenhuma ocorrência encontrada "
+            "para os filtros selecionados."
         )
 
     else:
@@ -377,63 +653,106 @@ if arquivo is not None:
 
 
     # =====================================================
-    # EXPORTAÇÃO PARA EXCEL
+    # RESUMO POR COLABORADOR
     # =====================================================
 
-    st.subheader("4. Exportar relatório")
+    st.subheader(
+        "4. Resumo por colaborador"
+    )
 
 
-    def gerar_excel(
-        resultado_completo,
-        ocorrencias_encontradas
-    ):
-        """
-        Gera um arquivo Excel em memória.
+    resumo_base = (
+        dados_filtrados
+        .groupby(
+            [
+                "Matrícula",
+                "Nome"
+            ],
+            as_index=False
+        )
+        .agg(
+            Registros=(
+                "Nome",
+                "size"
+            ),
 
-        O arquivo terá duas abas:
+            Ocorrencias=(
+                "Status",
+                lambda x: (
+                    x
+                    == "⚠️ Interjornada inferior ao limite"
+                ).sum()
+            ),
 
-        1. Resultado Completo
-        2. Ocorrências
-
-        BytesIO permite criar o arquivo
-        sem precisar salvá-lo fisicamente
-        antes do download.
-        """
-
-        buffer = BytesIO()
-
-        with pd.ExcelWriter(
-            buffer,
-            engine="openpyxl"
-        ) as writer:
-
-            resultado_completo.to_excel(
-                writer,
-                sheet_name="Resultado Completo",
-                index=False
+            DeficitHoras=(
+                "DeficitHoras",
+                "sum"
             )
+        )
+    )
 
-            ocorrencias_encontradas.to_excel(
-                writer,
-                sheet_name="Ocorrências",
-                index=False
-            )
 
-        buffer.seek(0)
+    resumo_base[
+        "Déficit Total"
+    ] = (
+        resumo_base[
+            "DeficitHoras"
+        ]
+        .apply(decimal_para_hhmm)
+    )
 
-        return buffer
+
+    resumo_colaborador = (
+        resumo_base[
+            [
+                "Matrícula",
+                "Nome",
+                "Registros",
+                "Ocorrencias",
+                "Déficit Total"
+            ]
+        ]
+        .copy()
+    )
+
+
+    resumo_colaborador.rename(
+        columns={
+            "Ocorrencias": "Ocorrências"
+        },
+        inplace=True
+    )
+
+
+    st.dataframe(
+        resumo_colaborador,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+    # =====================================================
+    # EXPORTAÇÃO
+    # =====================================================
+
+    st.subheader(
+        "5. Exportar relatório"
+    )
 
 
     arquivo_excel = gerar_excel(
         resultado,
-        ocorrencias
+        ocorrencias,
+        resumo_colaborador
     )
 
 
     st.download_button(
         label="📥 Baixar relatório em Excel",
         data=arquivo_excel,
-        file_name="relatorio_interjornada.xlsx",
+        file_name=(
+            "relatorio_interjornada.xlsx"
+        ),
         mime=(
             "application/"
             "vnd.openxmlformats-officedocument."
@@ -443,17 +762,18 @@ if arquivo is not None:
 
 
     # =====================================================
-    # INFORMAÇÃO FINAL
+    # OBSERVAÇÃO
     # =====================================================
 
     st.info(
         """
         O sistema identifica intervalos inferiores ao
-        parâmetro configurado de 11 horas entre jornadas.
+        parâmetro configurado entre jornadas.
 
-        O déficit apresentado representa a diferença
-        necessária para atingir esse parâmetro e não deve
-        ser interpretado automaticamente como quantidade
-        de horas a pagar.
+        O déficit representa apenas a diferença entre
+        o intervalo encontrado e o limite configurado.
+
+        O resultado não deve ser interpretado
+        automaticamente como quantidade de horas a pagar.
         """
     )
