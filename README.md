@@ -1,5 +1,5 @@
 # RH Jornada Analyzer
-
+**Versão atual: 0.2**
 Aplicação desenvolvida em Python para análise de jornada de trabalho e identificação de possíveis ocorrências de interjornada inferior ao parâmetro de 11 horas.
 
 O projeto foi criado com foco em rotinas de Recursos Humanos e Departamento Pessoal, utilizando tecnologia para automatizar análises que normalmente exigem conferência manual de dados.
@@ -28,6 +28,16 @@ O projeto foi criado com foco em rotinas de Recursos Humanos e Departamento Pess
 * Exibição separada das ocorrências encontradas
 * Exportação dos resultados para Excel
 * Geração de arquivo com abas de resultado completo e ocorrências
+* Filtro por colaborador
+* Filtro por período
+* Configuração dinâmica do limite mínimo entre jornadas
+* Conversão automática de horas decimais para HH:MM
+* Resumo individual por colaborador
+* Indicadores atualizados conforme os filtros selecionados
+* Exportação para Excel com três abas:
+  * Resultado Completo
+  * Ocorrências
+  * Resumo por Colaborador
 
 ## Tecnologias utilizadas
 
