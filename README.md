@@ -4,6 +4,10 @@ Aplicação desenvolvida em Python para análise de jornada de trabalho e identi
 
 O projeto foi criado com foco em rotinas de Recursos Humanos e Departamento Pessoal, utilizando tecnologia para automatizar análises que normalmente exigem conferência manual de dados.
 
+## Demonstração
+
+![Dashboard do RH Jornada Analyzer](assets/dashboard.png)
+
 ## Funcionalidades
 
 * Importação de arquivos Excel e CSV
